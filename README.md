@@ -1,7 +1,7 @@
 # SysGate-x64
 
 ![Platform](https://img.shields.io/badge/Platform-Windows_11_x64-0078D6?style=flat-square&logo=windows&logoColor=white)
-![Language](https://img.shields.io/badge/Language-C11_%7C_MASM_x64-00599C?style=flat-square)
+![Language](https://img.shields.io/badge/Language-C_%7C_MASM_x64-00599C?style=flat-square)
 ![Compiler](https://img.shields.io/badge/Compiler-MSVC_%2F_ml64-orange?style=flat-square)
 ![Arch](https://img.shields.io/badge/Arch-x86__64-brightgreen?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)
