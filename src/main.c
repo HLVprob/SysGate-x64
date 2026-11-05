@@ -13,7 +13,7 @@ int main(void) {
     printf("[+] 'syscall; ret' adr : 0x%p\n", (void*)g_SysGateTable.SyscallGadgetAddress);
     printf("[+] Toplam Zw fonksiyon: %u\n\n", g_SysGateTable.Count);
 
-    // Hash hesapla ve SSN al
+    // hash
     uint32_t hashAlloc   = SysGateComputeHash("NtAllocateVirtualMemory");
     uint32_t hashProtect = SysGateComputeHash("NtProtectVirtualMemory");
     uint32_t hashFree    = SysGateComputeHash("NtFreeVirtualMemory");
@@ -32,12 +32,12 @@ int main(void) {
         return -1;
     }
 
-    // 1) Bellek Tahsisi (Indirect Syscall)
+    // indirect syscall
     printf("[*] Indirect syscall ile bellek ayriliyor (NtAllocateVirtualMemory)...\n");
 
     PVOID pBaseAddress = NULL;
-    SIZE_T uRegionSize = 0x1000; // 4096 byte (1 sayfa)
-    HANDLE hProcess = (HANDLE)(intptr_t)-1; // Mevcut process handle (-1)
+    SIZE_T uRegionSize = 0x1000; // 4096 byte
+    HANDLE hProcess = (HANDLE)(intptr_t)-1; // process handle
 
     NTSTATUS status = SysGateDispatch(
         ssnAlloc,
@@ -58,12 +58,11 @@ int main(void) {
 
     printf("[+] Bellek ayrildi: 0x%p (Boyut: 0x%llX)\n", pBaseAddress, (unsigned long long)uRegionSize);
 
-    // Belleğe basit bir test verisi yaz
     uint8_t testPattern[] = { 0x90, 0x90, 0xC3 }; // nop, nop, ret
     memcpy(pBaseAddress, testPattern, sizeof(testPattern));
     printf("[+] Bellek alanina test verisi yazildi.\n");
 
-    // 2) Bellek Korumasini Degistirme (PAGE_READWRITE -> PAGE_EXECUTE_READ)
+    // 2) PAGE_READWRITE -> PAGE_EXECUTE_READ
     printf("[*] Bellek korumasi degistiriliyor (NtProtectVirtualMemory)...\n");
     ULONG oldProtect = 0;
     SIZE_T uProtectSize = 0x1000;
