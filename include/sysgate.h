@@ -67,3 +67,4 @@ uint32_t SysGateComputeHash(const char* string);
     SysGateDispatch(SysGateGetSSNByHash(funcHash), SysGateGetGadgetAddress(), argCount, __VA_ARGS__)
 
 #endif /* SYSGATE_H */
+

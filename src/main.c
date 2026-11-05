@@ -1,40 +1,19 @@
-/**
- * @file main.c
- * @brief Dynamic Indirect Syscall Engine - Verification & Diagnostic Harness
- * @target Windows 11 x64 User-Mode
- */
-
 #include <stdio.h>
 #include <windows.h>
 #include "../include/sysgate.h"
 
-/* Precomputed Murmur3 Hashes for standard NT Native APIs */
-#define HASH_NtAllocateVirtualMemory  0x6e2c31e6
-#define HASH_NtProtectVirtualMemory   0x92f02548
-#define HASH_NtFreeVirtualMemory      0xa142b938
-#define HASH_NtDelayExecution         0x77d07712
-
-static void PrintBanner(void) {
-    printf("====================================================================\n");
-    printf("  SysGate-x64: Dynamic Indirect Syscall Engine & Telemetry Bypass   \n");
-    printf("  Research Environment: Windows 11 x64 User-Mode Native Interface   \n");
-    printf("====================================================================\n\n");
-}
-
 int main(void) {
-    PrintBanner();
-
-    printf("[*] Initializing SysGate engine via Process Environment Block (PEB)...\n");
+    printf("[*] SysGate baslatiliyor (PEB parsing)...\n");
     if (!SysGateInitialize()) {
-        printf("[-] Failed to initialize SysGate engine. NTDLL parsing anomaly.\n");
+        printf("[-] Hata: ntdll okunamadi veya syscall gadget bulunamadi.\n");
         return -1;
     }
 
-    printf("[+] NTDLL Base Address        : 0x%p\n", (void*)g_SysGateTable.NtdllBase);
-    printf("[+] Discovered 'syscall; ret' : 0x%p\n", (void*)g_SysGateTable.SyscallGadgetAddress);
-    printf("[+] Parsed Native Services    : %u distinct system service stubs\n\n", g_SysGateTable.Count);
+    printf("[+] ntdll.dll adresi   : 0x%p\n", (void*)g_SysGateTable.NtdllBase);
+    printf("[+] 'syscall; ret' adr : 0x%p\n", (void*)g_SysGateTable.SyscallGadgetAddress);
+    printf("[+] Toplam Zw fonksiyon: %u\n\n", g_SysGateTable.Count);
 
-    /* Dynamic Hash Computation & SSN Resolution */
+    // Hash hesapla ve SSN al
     uint32_t hashAlloc   = SysGateComputeHash("NtAllocateVirtualMemory");
     uint32_t hashProtect = SysGateComputeHash("NtProtectVirtualMemory");
     uint32_t hashFree    = SysGateComputeHash("NtFreeVirtualMemory");
@@ -43,34 +22,23 @@ int main(void) {
     uint16_t ssnProtect = SysGateGetSSNByHash(hashProtect);
     uint16_t ssnFree    = SysGateGetSSNByHash(hashFree);
 
-    printf("[*] Dynamic System Service Number (SSN) Resolutions:\n");
-    printf("    -> NtAllocateVirtualMemory : SSN = 0x%04X (Hash: 0x%08X)\n", ssnAlloc, hashAlloc);
-    printf("    -> NtProtectVirtualMemory  : SSN = 0x%04X (Hash: 0x%08X)\n", ssnProtect, hashProtect);
-    printf("    -> NtFreeVirtualMemory     : SSN = 0x%04X (Hash: 0x%08X)\n\n", ssnFree, hashFree);
+    printf("[*] Dinamik SSN Cozumleri:\n");
+    printf("    -> NtAllocateVirtualMemory : SSN = 0x%04X\n", ssnAlloc);
+    printf("    -> NtProtectVirtualMemory  : SSN = 0x%04X\n", ssnProtect);
+    printf("    -> NtFreeVirtualMemory     : SSN = 0x%04X\n\n", ssnFree);
 
     if (ssnAlloc == 0xFFFF || ssnProtect == 0xFFFF || ssnFree == 0xFFFF) {
-        printf("[-] Error: Unable to resolve one or more target SSNs.\n");
+        printf("[-] SSN degerlerinden biri bulunamadi!\n");
         return -1;
     }
 
-    /* Verification Test: Indirectly allocate, protect, and deallocate memory */
-    printf("[*] Executing Memory Allocation via Indirect Syscall...\n");
+    // 1) Bellek Tahsisi (Indirect Syscall)
+    printf("[*] Indirect syscall ile bellek ayriliyor (NtAllocateVirtualMemory)...\n");
 
     PVOID pBaseAddress = NULL;
-    SIZE_T uRegionSize = 0x1000; /* 4 KB Page */
-    HANDLE hProcess = (HANDLE)(intptr_t)-1; /* Current Process Pseudo-Handle */
+    SIZE_T uRegionSize = 0x1000; // 4096 byte (1 sayfa)
+    HANDLE hProcess = (HANDLE)(intptr_t)-1; // Mevcut process handle (-1)
 
-    /*
-     * NtAllocateVirtualMemory Prototype:
-     * NTSTATUS NtAllocateVirtualMemory(
-     *     HANDLE ProcessHandle,
-     *     PVOID *BaseAddress,
-     *     ULONG_PTR ZeroBits,
-     *     PSIZE_T RegionSize,
-     *     ULONG AllocationType,
-     *     ULONG Protect
-     * );
-     */
     NTSTATUS status = SysGateDispatch(
         ssnAlloc,
         SysGateGetGadgetAddress(),
@@ -84,20 +52,19 @@ int main(void) {
     );
 
     if (!NT_SUCCESS(status)) {
-        printf("[-] NtAllocateVirtualMemory failed with NTSTATUS: 0x%08X\n", status);
+        printf("[-] NtAllocateVirtualMemory basarisiz: 0x%08X\n", status);
         return -1;
     }
 
-    printf("[+] Indirect allocation successful: Allocated page at 0x%p (Size: 0x%llX)\n", 
-           pBaseAddress, (unsigned long long)uRegionSize);
+    printf("[+] Bellek ayrildi: 0x%p (Boyut: 0x%llX)\n", pBaseAddress, (unsigned long long)uRegionSize);
 
-    /* Write test data pattern into allocated memory */
-    uint8_t testPayload[] = { 0x90, 0x90, 0xCC, 0xC3 }; /* NOP, NOP, INT3, RET */
-    memcpy(pBaseAddress, testPayload, sizeof(testPayload));
-    printf("[+] Memory buffer successfully written with diagnostic test pattern.\n");
+    // Belleğe basit bir test verisi yaz
+    uint8_t testPattern[] = { 0x90, 0x90, 0xC3 }; // nop, nop, ret
+    memcpy(pBaseAddress, testPattern, sizeof(testPattern));
+    printf("[+] Bellek alanina test verisi yazildi.\n");
 
-    /* Alter page protection to PAGE_EXECUTE_READ via indirect syscall */
-    printf("[*] Transitioning Memory Page Protection (PAGE_READWRITE -> PAGE_EXECUTE_READ)...\n");
+    // 2) Bellek Korumasini Degistirme (PAGE_READWRITE -> PAGE_EXECUTE_READ)
+    printf("[*] Bellek korumasi degistiriliyor (NtProtectVirtualMemory)...\n");
     ULONG oldProtect = 0;
     SIZE_T uProtectSize = 0x1000;
 
@@ -113,13 +80,13 @@ int main(void) {
     );
 
     if (!NT_SUCCESS(status)) {
-        printf("[-] NtProtectVirtualMemory failed with NTSTATUS: 0x%08X\n", status);
+        printf("[-] NtProtectVirtualMemory basarisiz: 0x%08X\n", status);
         return -1;
     }
-    printf("[+] Page protection updated successfully. Old Protection: 0x%04X\n", oldProtect);
+    printf("[+] Bellek korumasi guncellendi (Eski koruma: 0x%04X)\n", oldProtect);
 
-    /* Deallocate memory page via indirect syscall */
-    printf("[*] Deallocating memory page via NtFreeVirtualMemory...\n");
+    // 3) Bellek Temizleme
+    printf("[*] Bellek serbest birakiliyor (NtFreeVirtualMemory)...\n");
     SIZE_T uFreeSize = 0;
 
     status = SysGateDispatch(
@@ -133,13 +100,12 @@ int main(void) {
     );
 
     if (!NT_SUCCESS(status)) {
-        printf("[-] NtFreeVirtualMemory failed with NTSTATUS: 0x%08X\n", status);
+        printf("[-] NtFreeVirtualMemory basarisiz: 0x%08X\n", status);
         return -1;
     }
 
-    printf("[+] Memory successfully released. Page state normalized.\n\n");
-    printf("[✓] All Indirect Syscall execution tests completed with NTSTATUS: 0x00000000 (STATUS_SUCCESS).\n");
-    printf("====================================================================\n");
+    printf("[+] Bellek basariyla serbest birakildi.\n\n");
+    printf("[✓] Tum dolayli syscall testleri basariyla gecti (STATUS_SUCCESS).\n");
 
     return 0;
 }

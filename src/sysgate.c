@@ -1,9 +1,3 @@
-/**
- * @file sysgate.c
- * @brief Dynamic System Service Number (SSN) Resolution & Gadget Locator
- * @target Windows 11 x64 User-Mode
- */
-
 #include "../include/sysgate.h"
 #include <stdio.h>
 
@@ -26,9 +20,7 @@ typedef struct _CUSTOM_LDR_DATA_TABLE_ENTRY {
     CUSTOM_UNICODE_STRING BaseDllName;
 } CUSTOM_LDR_DATA_TABLE_ENTRY, *PCUSTOM_LDR_DATA_TABLE_ENTRY;
 
-/**
- * @brief Computes a deterministic 32-bit Murmur3-like hash of an ASCII string.
- */
+// Basit string hash fonksiyonu (Murmur3 mantigi)
 uint32_t SysGateComputeHash(const char* string) {
     if (!string) return 0;
     
@@ -42,9 +34,7 @@ uint32_t SysGateComputeHash(const char* string) {
     return hash;
 }
 
-/**
- * @brief Retrieves the base address of ntdll.dll via Process Environment Block (PEB).
- */
+// GetModuleHandle yerine PEB üzerinden ntdll base adresini bulur
 static uintptr_t GetNtdllBaseFromPEB(void) {
     PPEB pPeb = (PPEB)__readgsqword(0x60);
     PPEB_LDR_DATA pLdr = pPeb->Ldr;
@@ -55,6 +45,7 @@ static uintptr_t GetNtdllBaseFromPEB(void) {
         PCUSTOM_LDR_DATA_TABLE_ENTRY pEntry = CONTAINING_RECORD(pCurrent, CUSTOM_LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
         if (pEntry->BaseDllName.Buffer != NULL) {
             PWSTR name = pEntry->BaseDllName.Buffer;
+            // Case-insensitive kontrol
             if ((name[0] == L'n' || name[0] == L'N') &&
                 (name[1] == L't' || name[1] == L'T') &&
                 (name[2] == L'd' || name[2] == L'D') &&
@@ -68,15 +59,14 @@ static uintptr_t GetNtdllBaseFromPEB(void) {
     return 0;
 }
 
-/**
- * @brief Searches the executable section of ntdll for a 'syscall; ret' (0x0F 0x05 0xC3) sequence.
- */
+// ntdll .text section icinde 'syscall; ret' (0F 05 C3) byte dizisini arar
 static uintptr_t FindSyscallGadget(uintptr_t ntdllBase) {
     PIMAGE_DOS_HEADER pDos = (PIMAGE_DOS_HEADER)ntdllBase;
     PIMAGE_NT_HEADERS64 pNt = (PIMAGE_NT_HEADERS64)(ntdllBase + pDos->e_lfanew);
     PIMAGE_SECTION_HEADER pSec = IMAGE_FIRST_SECTION(pNt);
 
     for (WORD i = 0; i < pNt->FileHeader.NumberOfSections; i++) {
+        // Sadece calistirilabilir kod bolumunde ara
         if ((pSec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) &&
             (pSec[i].Characteristics & IMAGE_SCN_CNT_CODE)) {
             
@@ -93,9 +83,7 @@ static uintptr_t FindSyscallGadget(uintptr_t ntdllBase) {
     return 0;
 }
 
-/**
- * @brief QuickSort comparator to sort SYSGATE_ENTRY elements by FunctionAddress ascending.
- */
+// qsort icin fonksiyon adresi karsilastirici
 static int CompareSysgateEntries(const void* a, const void* b) {
     const SYSGATE_ENTRY* ea = (const SYSGATE_ENTRY*)a;
     const SYSGATE_ENTRY* eb = (const SYSGATE_ENTRY*)b;
@@ -104,10 +92,7 @@ static int CompareSysgateEntries(const void* a, const void* b) {
     return 0;
 }
 
-/**
- * @brief Initializes the SysGate engine: parses ntdll export table, 
- * calculates SSNs dynamically via memory ordering, and discovers indirect execution gadgets.
- */
+// Engine'i baslatir: EAT parse eder, adres siralamasiyla SSN bulur, gadget arar
 bool SysGateInitialize(void) {
     uintptr_t ntdllBase = GetNtdllBaseFromPEB();
     if (!ntdllBase) return false;
@@ -129,7 +114,7 @@ bool SysGateInitialize(void) {
 
     uint32_t trackedCount = 0;
 
-    /* Step 1: Collect all 'Zw' export stubs */
+    // 1. Adim: ntdll export tablosundaki Zw* stublarini topla
     for (DWORD i = 0; i < pExport->NumberOfNames; i++) {
         const char* funcName = (const char*)(ntdllBase + pAddressOfNames[i]);
         if (funcName[0] == 'Z' && funcName[1] == 'w') {
@@ -137,29 +122,28 @@ bool SysGateInitialize(void) {
             uintptr_t funcAddr = ntdllBase + pAddressOfFunctions[ordinal];
 
             if (trackedCount < SYSGATE_MAX_ENTRIES) {
-                /* Store equivalent 'Nt' hash for lookup flexibility */
-                char ntEquivalent[128];
-                ntEquivalent[0] = 'N';
-                ntEquivalent[1] = 't';
+                // Nt ile arayabilmek icin ismin basini Nt olarak hashle
+                char ntName[128];
+                ntName[0] = 'N';
+                ntName[1] = 't';
                 int charIdx = 2;
                 while (funcName[charIdx] && charIdx < 127) {
-                    ntEquivalent[charIdx] = funcName[charIdx];
+                    ntName[charIdx] = funcName[charIdx];
                     charIdx++;
                 }
-                ntEquivalent[charIdx] = '\0';
+                ntName[charIdx] = '\0';
 
-                g_SysGateTable.Entries[trackedCount].Hash = SysGateComputeHash(ntEquivalent);
+                g_SysGateTable.Entries[trackedCount].Hash = SysGateComputeHash(ntName);
                 g_SysGateTable.Entries[trackedCount].FunctionAddress = funcAddr;
-                g_SysGateTable.Entries[trackedCount].SSN = 0; /* Computed in step 2 */
+                g_SysGateTable.Entries[trackedCount].SSN = 0;
                 trackedCount++;
             }
         }
     }
 
-    /* Step 2: Sort entries by Virtual Address ascending. 
-     * In NTDLL x64, syscall stubs are ordered sequentially according to their SSNs.
-     * This eliminates sensitivity to hook detours (e.g. 5-byte JMP) placed in function bodies.
-     */
+    // 2. Adim: Adreslere gore kucukten buyuge sirala.
+    // Windows x64'te ntdll'deki syscall stublari SSN sirasina gore siralanir.
+    // Bu yontem fonksiyonun ilk byte'lari hooklanmis olsa bile dogru SSN'i verir.
     qsort(g_SysGateTable.Entries, trackedCount, sizeof(SYSGATE_ENTRY), CompareSysgateEntries);
 
     for (uint32_t i = 0; i < trackedCount; i++) {
@@ -170,9 +154,6 @@ bool SysGateInitialize(void) {
     return true;
 }
 
-/**
- * @brief Retrieves the System Service Number associated with a hashed function name.
- */
 uint16_t SysGateGetSSNByHash(uint32_t functionHash) {
     for (uint32_t i = 0; i < g_SysGateTable.Count; i++) {
         if (g_SysGateTable.Entries[i].Hash == functionHash) {
@@ -182,9 +163,6 @@ uint16_t SysGateGetSSNByHash(uint32_t functionHash) {
     return (uint16_t)0xFFFF;
 }
 
-/**
- * @brief Retrieves the discovered 'syscall; ret' gadget address.
- */
 uintptr_t SysGateGetGadgetAddress(void) {
     return g_SysGateTable.SyscallGadgetAddress;
 }
